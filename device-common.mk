@@ -18,3 +18,9 @@ PRODUCT_PACKAGES += \
 
 PRODUCT_PRODUCT_PROPERTIES += \
     ro.fastbootd.available=true
+
+# 使用预编译内核 Image，未启用 CONFIG_IKCONFIG，镜像里没有可提取的内核 config。
+# A16 的 check_vintf 会尝试从内核镜像提取 config 做 VINTF 内核要求校验，
+# 提取失败会中断构建（Cannot extract kernel configs）。
+# shellcheck 掉的开关：本设备不需要 OTA 级内核 VINTF 校验。
+PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false
