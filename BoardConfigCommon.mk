@@ -32,6 +32,10 @@ BOARD_KERNEL_OFFSET := 0x00008000
 BOARD_RAMDISK_OFFSET := 0x01000000
 BOARD_KERNEL_TAGS_OFFSET := 0x00000100
 BOARD_BOOTIMG_HEADER_VERSION ?= 1
+# OrangeFox/TWRP 读取的是 BOARD_BOOT_HEADER_VERSION（注意与 AOSP 的
+# BOARD_BOOTIMG_HEADER_VERSION 是两个不同变量名）。不设置时
+# bootable/recovery/orangefox.mk 会告警并自行默认 v1，显式声明以消除歧义。
+BOARD_BOOT_HEADER_VERSION := 1
 BOARD_MKBOOTIMG_ARGS := \
     --base $(BOARD_KERNEL_BASE) \
     --pagesize $(BOARD_KERNEL_PAGESIZE) \
@@ -70,15 +74,16 @@ TARGET_USERIMAGES_USE_F2FS := true
 TARGET_USES_MKE2FS := true
 
 # Android Verified Boot
-BOARD_AVB_ENABLE := true
-BOARD_AVB_RECOVERY_ALGORITHM := SHA256_RSA4096
-BOARD_AVB_RECOVERY_KEY_PATH := external/avb/test/data/testkey_rsa4096.pem
-BOARD_AVB_RECOVERY_ROLLBACK_INDEX := 1
-BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 1
+# recovery.img 不做 AVB 签名：
+#   1) 三星 bootloader 不信任 AOSP testkey，签了也不会通过校验；
+#   2) crDroid d1x 官方 recovery.img 实测无 AVB footer（dtbo 紧接 ramdisk）；
+#   3) 保留 AVB 会改变镜像布局，与已知可用镜像不一致。
 
 # Security patch level
-PLATFORM_VERSION := 99.87.36
-PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
+# 注意：A16 的 PLATFORM_VERSION 由 release config（本树 lunch 用 bp2a -> 16）提供。
+# 旧 fox_12.1 树的 "PLATFORM_VERSION := 99.87.36" 属于 TWRP-12.x 时代的 hack，
+# 在 A16 上会让 PLATFORM_VERSION 与 PLATFORM_VERSION_LAST_STABLE 自相矛盾，
+# 故此处不再覆盖版本号，仅保留补丁级别。
 PLATFORM_SECURITY_PATCH := 2099-12-31
 VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
 
@@ -126,8 +131,28 @@ TW_EXCLUDE_BASH := true
 TWRP_INCLUDE_LOGCAT := true
 TARGET_USES_LOGD := true
 
+# Languages
+# 简体中文为默认语言；TW_EXTRA_LANGUAGES=true 才会把
+# gui/theme/extra-languages/ 打包进 ramdisk（zh_CN / zh_TW 都在那里）。
+# 英文由 gui/theme/common/languages/en.xml 提供，始终存在。
+TW_DEFAULT_LANGUAGE := zh_CN
+TW_EXTRA_LANGUAGES := true
+
+# 默认时区：中国标准时间（UTC+8，无夏令时）
+# OrangeFox 该变量是 POSIX TZ 串（data.cpp:672 直接 setenv("TZ", ...)），
+# 不是 "Asia/Shanghai"。源码默认值是中欧时间 CET-1;CEST,M3.5.0,M10.5.0，
+# 必须显式覆盖，否则恢复出厂后时区会变成欧洲。
+# 写入位置：tw_time_zone / tw_time_zone_guisel / persist.sys.timezone
+OF_DEFAULT_TIMEZONE := CST-8
+
 # OrangeFox
 OF_MAINTAINER := mcajun87
+# 解密（必须）：FBE + metadata 加密 + fscrypt policy v2
+# std::property twrp.keymaster_version 会被设为该值。
+# 若真机解密失败（报 keymaster 相关错误），按以下顺序试：
+#   a) OF_DEFAULT_KEYMASTER_VERSION := 4.1
+#   b) OF_DEFAULT_KEYMASTER_VERSION := 4.1  +  TW_FORCE_KEYMASTER_VER := true
+#   c) 加 OF_NO_KEYMASTER_VER_4X := 1（禁用 4.x 支持，回退 keymaster 3）
 OF_DEFAULT_KEYMASTER_VERSION := 4.0
 OF_USE_LZMA_COMPRESSION := 1
 LZMA_RAMDISK_TARGETS := recovery
@@ -140,4 +165,6 @@ OF_CLOCK_POS := 1
 OF_HIDE_NOTCH := 1
 OF_ALLOW_DISABLE_NAVBAR := 0
 OF_FLASHLIGHT_ENABLE := 1
-OF_FL_PATH1 := /dev/fox_flash
+# 原值 /dev/fox_flash 是模板占位符，该节点不存在；三星 Exynos 机型走 camera
+# flash sysfs。若真机上开关无效，改为 OF_FLASHLIGHT_ENABLE := 0 即可（不会崩溃）。
+OF_FL_PATH1 := /sys/class/camera/flash/rear_flash

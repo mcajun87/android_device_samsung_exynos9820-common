@@ -22,7 +22,10 @@ case "$FOX_BUILD_DEVICE" in
 	beyond0lte|beyond1lte|beyond2lte|beyondx|d1|d1x|d2s|d2x|f62)
 		export ALLOW_MISSING_DEPENDENCIES=true
 		export FOX_VANILLA_BUILD=1
-		export FOX_SAMSUNG_DEVICE=1
-		export FOX_DRASTIC_SIZE_REDUCTION=1
+		# FOX_SAMSUNG_DEVICE 在本版 OrangeFox 源码中同样零命中（死开关），已注释
+		# export FOX_SAMSUNG_DEVICE=1
+		# FOX_DRASTIC_SIZE_REDUCTION 在本版 OrangeFox 源码里不存在（grep 零命中），
+		# 属上游遗留的死开关，不产生任何裁剪效果，故注释掉。
+		# export FOX_DRASTIC_SIZE_REDUCTION=1
 		;;
 esac
