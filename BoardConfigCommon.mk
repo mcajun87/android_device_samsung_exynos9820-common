@@ -165,6 +165,13 @@ OF_CLOCK_POS := 1
 OF_HIDE_NOTCH := 1
 OF_ALLOW_DISABLE_NAVBAR := 0
 OF_FLASHLIGHT_ENABLE := 1
-# 原值 /dev/fox_flash 是模板占位符，该节点不存在；三星 Exynos 机型走 camera
-# flash sysfs。若真机上开关无效，改为 OF_FLASHLIGHT_ENABLE := 0 即可（不会崩溃）。
-OF_FL_PATH1 := /sys/class/camera/flash/rear_flash
+# OF_FL_PATH1 是【LED class 目录】，不是 sysfs 属性节点本身。
+# OrangeFox 会拼接 "<OF_FL_PATH1>/brightness" 与 "<OF_FL_PATH1>/max_brightness"
+# （bootable/recovery/gui/action.cpp:2646-2648），找不到就打印
+# "Flashlight file not found!" 并直接返回。
+# 本树的 recovery/root/system/etc/init/exynos9820-common.rc 会创建该目录：
+#     mkdir /dev/fox_flash
+#     symlink /sys/class/camera/flash/rear_flash /dev/fox_flash/brightness
+# 所以这里必须填目录 /dev/fox_flash；填 /sys/class/camera/flash/rear_flash
+# 会变成去找 ".../rear_flash/brightness"（不存在），手电筒失效。
+OF_FL_PATH1 := /dev/fox_flash
