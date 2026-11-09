@@ -138,6 +138,38 @@ mka adbd recoveryimage
 - `build/soong/rust/bindgen.go` 把 bindgen 的内核钉在 `clang-r530567`。
   若本机只有其他版本，可为缺失版本号建立指向现有工具链的符号链接。
 
+
+## 继承自 fox_12.1 的文件：离线验证结论
+
+以下文件原样继承自上游 fox_12.1 树，未做修改。已用**可验证的实物证据**逐项核对，
+结论是不需要改动（供以后排查时参考，避免重复怀疑）：
+
+| 项 | 结论 | 证据来源 |
+| :-- | :-- | :-- |
+| `twrp.flags` 中 `/modem` → `by-name/radio` | ✅ 分区名正确 | ROM `updater-script` 第 125 行：`package_extract_file("firmware/SM-N971N/modem.bin", "/dev/block/by-name/radio")` |
+| `13d60000.ufs` 这个平台路径 | ✅ 在 d1x 上真实存在 | 同一 `updater-script` 第 95 行：`package_extract_file("boot.img", "/dev/block/platform/13d60000.ufs/by-name/boot")` |
+| `TARGET_OTA_ASSERT_DEVICE := d1x,d1xks` | ✅ 两个名字都对 | ROM `metadata`：`post-build=samsung/d1xks/d1x:12/SP1A.210812.016/N971NKSU2HWH5`（指纹用 `d1xks`，OTA 断言用 `d1x`） |
+| `BOARD_SUPER_PARTITION_SIZE := 6480199680` | ✅ 数值有出处 | ROM `dynamic_partitions_op_list`：`add_group samsung_dynamic_partitions 6476005376`（super = 组大小 + 4 MiB 元数据） |
+| `OF_DEFAULT_KEYMASTER_VERSION := 4.0` | ✅ 与 ROM 基座匹配 | 同上 `metadata` 显示 vendor 基座为 Android 12（`SP1A.210812.016`），且 `exynos9820-common.rc` 启动的就是 `android.hardware.keymaster@4.0-service.samsung` |
+| `init.recovery.usb.rc` 会被加载 | ✅ 机制正确 | `bootable/recovery/etc/init.rc:4` 显式 `import /init.recovery.usb.rc`；设备树 `recovery/root/` 下的同名文件覆盖 TWRP 自带版本 |
+| `exynos9820-common.rc` 的 TEE 解密流程 | ✅ 无需改 | 依次拉起 `tzdaemon` → `tzts_daemon` → `keymaster@4.0` → `gatekeeper@1.0`，并在 `twrp.decrypt.done` 后全部停止，逻辑自洽 |
+| `prepdecrypt.sh` | ✅ 无需改 | 从 ROM 的 `system/build.prop`、`vendor/build.prop` 读取版本与补丁级别后 `resetprop`，符合三星 TEEgris 的校验要求 |
+| VINTF manifests（system 与 vendor） | ✅ 无需改 | 声明 `keymaster@4.0` 与 `gatekeeper@1.0`，与 rc 中启动的 HAL 版本一致 |
+
+### 唯一待真机确认的点：USB UDC 名
+
+`init.recovery.usb.rc` 中：
+
+```rc
+setprop sys.usb.controller 10c00000.dwc3
+```
+
+- USB 控制器的 **platform 设备名**是 `10c00000.usb`（crDroid 官方 `recovery.fstab` 第 24 行：
+  `/devices/platform/10c00000.usb*` 用于 `voldmanaged=usb:auto`）。
+- 而 configfs 的 UDC 名由 dwc3 子设备在运行时注册，**无法离线确认**。
+- 若真机上 `adb` / `MTP` 不通，优先排查这里：可在 recovery 的终端执行
+  `ls /sys/class/udc/` 查看实际 UDC 名，再改成对应值。
+
 ## Credits
 
 - [ExtremeXT](https://github.com/ExtremeXT/android_device_samsung_exynos9820) —— TWRP 设备树原型
