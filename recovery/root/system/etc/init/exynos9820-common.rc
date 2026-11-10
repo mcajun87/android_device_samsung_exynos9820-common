@@ -86,3 +86,22 @@ service vendor.gatekeeper-1-0 /vendor_rom/bin/hw/android.hardware.gatekeeper@1.0
     setenv LD_LIBRARY_PATH /vendor_rom/lib64:/vendor_rom/lib64/hw
     disabled
     seclabel u:r:recovery:s0
+
+# ---------------------------------------------------------------------------
+# 禁止 ROM 还原官方 recovery（默认开启）
+#
+# 现象：刷入 OrangeFox 后能正常进入，但开机进入一次系统，recovery 分区就被
+#       写回官方镜像。原因是 AOSP 系的 install-recovery.sh 会应用
+#       /system/recovery-from-boot.p。
+# 处理：启动时把这两样东西改名（.ofdis），可逆、不删除。
+# 关闭方法：把下面 service 的触发删掉，或在 /tmp 建 no_stock_recovery_restore 标记。
+# ---------------------------------------------------------------------------
+service disablestockrecovery /system/bin/disablestockrecovery.sh
+    user root
+    group root
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+on boot
+    start disablestockrecovery
