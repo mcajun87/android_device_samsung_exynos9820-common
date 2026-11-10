@@ -62,3 +62,13 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
     persist.dbg.wfc_avail_ovr=1 \
     ro.carrier=CHN-CHINA-UNICOM \
     ro.vendor.ims_support=1
+
+# ---------------------------------------------------------------------------
+# OTA 更新源：指向自己的 OTA 清单（d1x）
+#
+# mcajun87/d1x-repo 的 ota/d1x.json 会在该仓库发布 Release 时由
+# .github/workflows/ota-update.yml 自动更新，手机的 Updater 就能看到新版本。
+# 刷机走 OrangeFox（zip 放手机里 Install 即可）。
+# ---------------------------------------------------------------------------
+PRODUCT_PROPERTY_OVERRIDES += \
+    lineage.updater.uri=https://raw.githubusercontent.com/mcajun87/d1x-repo/main/ota/d1x.json
