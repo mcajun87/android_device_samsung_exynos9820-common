@@ -241,3 +241,49 @@ AB_OTA_UPDATER := false
 > 提示：`ramdisk-recovery.img` 的压缩命令固定为 `lzma -f -c`
 > （`build/make/core/Makefile:1099`），无法在配置层调更高的压缩预设；
 > `strip` 也没用 —— ramdisk 里 254 个 ELF 只有 3 个带 `.symtab`。
+
+
+## 解密：boot 头部 os_version（实测结论）
+
+`/data` 在本机使用 **元数据加密**（`metadata_encryption=aes-256-xts`，
+密钥目录 `/metadata/vold/metadata_encryption`），因此**不需要用户密码**——
+只要 keymaster 能解封元数据密钥，开机就会自动挂载 `/data`。
+
+关键点：Samsung 的 keymaster 库（`libkeymaster_helper.so` /
+`libkeymaster4support.so`）会读取 `ro.build.version.release` 与
+`ro.build.version.security_patch`，但 TEE 侧真正用于校验的 `os_version`
+来自 **boot 镜像头部**：
+
+```
+SW> keymaster (tz_init_bootloader_info:1066) os_version : 160000
+SW> keymaster (swd_configure:106) invalid os_version or os_patchlevel
+SW> keymaster (km_check_key_os_version_patchlevels:194) key_os_version(170000) > _os_version(160000)
+I:Unable to decrypt metadata encryption
+```
+
+因此构建时必须在 `BOARD_MKBOOTIMG_ARGS` 里追加与 ROM 一致的版本：
+
+```makefile
+BOARD_MKBOOTIMG_ARGS += --os_version 17 --os_patch_level 2026-10-01
+```
+
+`prepdecrypt.sh` 另外把 `ro.system.build.*` / `ro.product.build.*` /
+`ro.odm.build.*` 同步成 ROM 的值，作为二次保险。
+
+## 手电筒：为什么用 rear_flash 而不是 LED class 节点
+
+`/sys/class/leds/torch-sec1/brightness` 看起来更"标准"（读写一致、0~15），
+但实测在本机**写进去不会点亮闪光灯**；能真正点亮的是三星私有节点
+`/sys/class/camera/flash/rear_flash`，它只接受 0 / 1 / 100 / 1001~1010 /
+2000~2015，且读值恒为 15。
+
+所以 `exynos9820-common.rc` 里：
+
+```
+mkdir /dev/fox_flash 0755 root root
+symlink /sys/class/camera/flash/rear_flash /dev/fox_flash/brightness
+write /dev/fox_flash/max_brightness 100
+```
+
+`max_brightness` 用 init 的 `write`（带 `O_CREAT`）在 tmpfs 里生成，内容 100
+= 工厂手电档 240 mA。若缺失，OrangeFox 会退化成写 `1`（60 mA，几乎看不见）。

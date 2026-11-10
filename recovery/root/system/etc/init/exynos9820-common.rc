@@ -4,8 +4,14 @@ on init
 on fs
     install_keyring
 
+    # 手电筒：OrangeFox 会拼 <OF_FL_PATH1>/brightness 与 <OF_FL_PATH1>/max_brightness。
+    # rear_flash 是三星私有接口（只认 0/1/100/1001-1010/2000-2015，读值恒为 15），
+    # 但它是本机唯一实测能点亮闪光灯的路径，所以继续用它。
+    # max_brightness 用 init 的 write 在 tmpfs 里生成，内容 100 = 工厂手电档 240mA；
+    # 若缺失，OrangeFox 会退化成写 "1"（仅 60mA，几乎看不见）。
     mkdir /dev/fox_flash 0755 root root
     symlink /sys/class/camera/flash/rear_flash /dev/fox_flash/brightness
+    write /dev/fox_flash/max_brightness 100
 
     symlink /vendor_rom/tee /vendor/tee
     mkdir /dev/socket/iwt 0770 system system

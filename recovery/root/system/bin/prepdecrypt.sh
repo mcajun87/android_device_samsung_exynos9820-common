@@ -38,6 +38,17 @@ resetprop ro.build.version.release "$os_version" || fail
 resetprop ro.build.version.security_patch "$os_patch" || fail
 resetprop ro.vendor.build.security_patch "$vendor_patch" || fail
 
+# Samsung keymaster 会比对密钥里记录的 os_version/patchlevel 与当前系统的值，
+# 密钥版本高于系统会被拒绝解封（/metadata 的元数据密钥就是这样拿不到的）。
+# boot 头部的 os_version 走 BoardConfig 的 BOARD_MKBOOTIMG_ARGS；
+# patchlevel 与其余维度由这里的属性提供。
+resetprop ro.system.build.version.release "$os_version" || fail
+resetprop ro.system.build.version.security_patch "$os_patch" || fail
+resetprop ro.product.build.version.release "$os_version" || fail
+resetprop ro.product.build.version.security_patch "$os_patch" || fail
+resetprop ro.odm.build.version.release "$os_version" || fail
+resetprop ro.odm.build.version.security_patch "$os_patch" || fail
+
 grep -q " /efs " /proc/mounts ||
     mount -t ext4 -o nosuid,nodev,noatime /dev/block/by-name/efs /efs || fail
 mkdir -p /mnt/vendor

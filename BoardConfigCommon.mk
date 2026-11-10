@@ -46,6 +46,14 @@ BOARD_MKBOOTIMG_ARGS := \
 
 # The physical system partition holds the dynamic partitions metadata
 BOARD_KERNEL_CMDLINE ?= androidboot.super_partition=system
+# 【解密关键】S-Boot 会把 boot 镜像头部的 os_version 字段直接交给 TEE 的 keymaster
+# （日志：tz_init_bootloader_info: os_version : 160000 -> swd_configure:
+#  invalid os_version or os_patchlevel -> km_check_key_os_version_patchlevels 拒绝解封
+#  /metadata 的密钥 -> Unable to decrypt metadata encryption -> /data 挂不上）。
+# 这条信息来自镜像头，resetprop 改属性完全无效。
+# 本机 ROM 是 Android 17，所以这里追加（追加在构建系统自己的 --os_version 16 之后，
+# mkbootimg 取最后一次的值）。
+BOARD_MKBOOTIMG_ARGS += --os_version 17 --os_patch_level 2026-10-01
 
 # Partitions
 BOARD_FLASH_BLOCK_SIZE := 4096
