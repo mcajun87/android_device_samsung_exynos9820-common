@@ -205,3 +205,19 @@ OF_FLASHLIGHT_ENABLE := 1
 # 所以这里必须填目录 /dev/fox_flash；填 /sys/class/camera/flash/rear_flash
 # 会变成去找 ".../rear_flash/brightness"（不存在），手电筒失效。
 OF_FL_PATH1 := /dev/fox_flash
+
+-include vendor/lineage/config/BoardConfigReservedSize.mk
+
+# ---------------------------------------------------------------------------
+# 引入 LineageOS 的 BoardConfig 公共配置（内核 + soong 变量导出）
+#
+# 本设备树最初只 include 了 BoardConfigReservedSize.mk，漏掉了这一行。
+# 后果（2026-11-11 实测）：vendor/lineage/config/BoardConfigKernel.mk 里定义的
+#   KERNEL_MAKE_CMD / KERNEL_MAKE_FLAGS / KERNEL_BUILD_OUT_PREFIX
+# 全部为空；BoardConfigSoong.mk 把这些空值导出给 soong，而 soong 把空值当作
+# "未定义"，于是解析 vendor/lineage/build/soong/Android.bp 里的
+# generated_kernel_includes 时报：
+#     cmd: unknown variable '$(KERNEL_BUILD_OUT_PREFIX)'
+# 整个 ROM 构建就此卡死。补上这一行后上述变量全部有值。
+# ---------------------------------------------------------------------------
+include vendor/lineage/config/BoardConfigLineage.mk
