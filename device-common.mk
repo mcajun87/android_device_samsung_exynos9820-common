@@ -12,12 +12,16 @@ PRODUCT_SHIPPING_API_LEVEL ?= 28
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
 PRODUCT_BUILD_SUPER_PARTITION := false
 
-PRODUCT_PACKAGES += \
-    android.hardware.fastboot@1.0-impl-mock \
-    fastbootd
-
-PRODUCT_PRODUCT_PROPERTIES += \
-    ro.fastbootd.available=true
+# fastbootd 及 mock HAL 已关闭（TW_INCLUDE_FASTBOOTD := false）：
+# recovery.img 受 67,633,152 字节分区上限约束，ramdisk 经 LZMA 压缩后仍需腾出空间。
+# 若以后需要 fastbootd 刷写逻辑分区，把下面这段和 BoardConfigCommon.mk 里的
+# TW_INCLUDE_FASTBOOTD 一起恢复即可。
+# PRODUCT_PACKAGES += \
+#     android.hardware.fastboot@1.0-impl-mock \
+#     fastbootd
+#
+# PRODUCT_PRODUCT_PROPERTIES += \
+#     ro.fastbootd.available=true
 
 # 使用预编译内核 Image，未启用 CONFIG_IKCONFIG，镜像里没有可提取的内核 config。
 # A16 的 check_vintf 会尝试从内核镜像提取 config 做 VINTF 内核要求校验，
