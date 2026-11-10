@@ -174,3 +174,70 @@ setprop sys.usb.controller 10c00000.dwc3
 
 - [ExtremeXT](https://github.com/ExtremeXT/android_device_samsung_exynos9820) —— TWRP 设备树原型
 - [LineageOS](https://github.com/LineageOS/android_device_samsung_exynos9820-common) —— 平台配置与内核
+
+## 体积控制（recovery 分区 67,633,152 字节）
+
+d1x 的 `recovery` 分区只有 67,633,152 字节，而 AOSP 16 + OrangeFox R12 的 ramdisk
+本身就接近上限，加上 49 MB 级别的 Exynos 内核，很容易超限：
+
+```
+content 上限 = 67,633,152 - 69,632(AVB footer) = 67,563,520
+content     = 2048(页) + kernel + ramdisk + dtbo(974,848)
+```
+
+超限时报错形如：
+
+```
+error: +.../recovery.img too large (68229120 > 67563520)
+```
+
+### 三个必须注意的开关语义
+
+`bootable/recovery/prebuilt/Android.mk` 里混用了两种判断方式，**写 `false` 的后果完全不同**：
+
+```make
+# (1) false 有效
+ifneq ($(filter $(PRODUCT_USE_DYNAMIC_PARTITIONS) $(TW_INCLUDE_FASTBOOTD),true),)
+
+# (2) 非空即真 —— 写 false 等于“启用”！必须留空
+ifneq ($(TW_INCLUDE_LPDUMP),)
+ifneq ($(TW_INCLUDE_LPTOOLS),)
+```
+
+因此本树写成：
+
+```make
+TW_INCLUDE_REPACKTOOLS := false
+TW_INCLUDE_LPDUMP :=
+TW_INCLUDE_LPTOOLS :=
+TW_INCLUDE_FASTBOOTD := false   # 但 PRODUCT_USE_DYNAMIC_PARTITIONS=true 时仍会带入 fastbootd
+```
+
+### `AB_OTA_UPDATER` 必须显式声明为 false
+
+`build/make/core/board_config.mk` 在 `AB_OTA_UPDATER` 为空时会默认置 `true`，
+后果有两个且都很隐蔽：
+
+1. `bootable/recovery/orangefox.mk` 里 `FOX_AB_DEVICE := 1`，OrangeFox 会把
+   **A-only 设备当 A/B 设备**处理；
+2. `update_engine_sideload`（约 3.0 MB）被打进 ramdisk，本机根本用不到。
+
+```make
+AB_OTA_UPDATER := false
+```
+
+### 实测减重账
+
+| 项目 | 未压缩 | 说明 |
+| :-- | --: | :-- |
+| `update_engine_sideload` + `bootctl` | 3,134,000 | `AB_OTA_UPDATER := false` 去掉 |
+| `lpdump` / `lpdumpd` / `liblpdump*` / `libprotobuf-cpp-full` | 2,552,328 | `TW_INCLUDE_LPDUMP :=` 留空去掉 |
+| 内核 `-O2` → `-Os` | — | 49,059,864 → 47,601,688（省 1,458,176） |
+| `tzdata`（反向，必须加回来） | +407,343 | `TW_EXCLUDE_TZDATA := false` |
+
+最终：kernel 47,601,688 + ramdisk(LZMA) 18,397,956 + dtbo 974,848 + 2048
+= **66,976,540 ≤ 67,563,520**，余量 583,680 字节。
+
+> 提示：`ramdisk-recovery.img` 的压缩命令固定为 `lzma -f -c`
+> （`build/make/core/Makefile:1099`），无法在配置层调更高的压缩预设；
+> `strip` 也没用 —— ramdisk 里 254 个 ELF 只有 3 个带 `.symtab`。

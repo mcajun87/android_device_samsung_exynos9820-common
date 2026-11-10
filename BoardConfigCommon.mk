@@ -74,10 +74,16 @@ TARGET_USERIMAGES_USE_F2FS := true
 TARGET_USES_MKE2FS := true
 
 # Android Verified Boot
-# recovery.img 不做 AVB 签名：
-#   1) 三星 bootloader 不信任 AOSP testkey，签了也不会通过校验；
-#   2) crDroid d1x 官方 recovery.img 实测无 AVB footer（dtbo 紧接 ramdisk）；
-#   3) 保留 AVB 会改变镜像布局，与已知可用镜像不一致。
+# 必须开启：三星 bootloader 在启动时会校验 recovery 分区的 AVB footer。
+# 实测能正常引导的第三方 recovery（Rocky7842 / crDroid 官方）在文件末尾 64 字节
+# 都有 "AVBf" footer，original_image_size = 内容实际大小，并填充到分区大小；
+# 而未签名的 recovery.img 会卡在三星 LOGO（内核都来不及运行）。
+BOARD_AVB_ENABLE := true
+BOARD_AVB_RECOVERY_ALGORITHM := SHA256_RSA4096
+BOARD_AVB_RECOVERY_KEY_PATH := external/avb/test/data/testkey_rsa4096.pem
+BOARD_AVB_RECOVERY_ROLLBACK_INDEX := 1
+# 与可用镜像（crDroid/Rocky7842）完全一致：其 vbmeta 里 Rollback Index Location = 0
+BOARD_AVB_RECOVERY_ROLLBACK_INDEX_LOCATION := 0
 
 # Security patch level
 # 注意：A16 的 PLATFORM_VERSION 由 release config（本树 lunch 用 bp2a -> 16）提供。
@@ -93,6 +99,12 @@ TARGET_RECOVERY_DEVICE_DIRS += $(COMMON_PATH)
 TARGET_RECOVERY_PIXEL_FORMAT := ABGR_8888
 RECOVERY_SDCARD_ON_DATA := true
 BOARD_SUPPRESS_SECURE_ERASE := true
+
+# 本机为 A-only（有独立 recovery 分区，无 boot_a/boot_b）。
+# AOSP 的 build/make/core/board_config.mk 在 AB_OTA_UPDATER 为空时会默认置 true，
+# 后果有二：OrangeFox 误判为 A/B 设备（FOX_AB_DEVICE=1，见 bootable/recovery/orangefox.mk:165），
+# 以及 update_engine_sideload（3.0 MB）被塞进 recovery ramdisk。故显式设为 false。
+AB_OTA_UPDATER := false
 
 # OrangeFox UPX-packs the ramdisk executables; a packed init needs execmem,
 # which its vendor_init subcontext lacks, so unpack init and keystore2 again.
@@ -121,11 +133,21 @@ TW_BACKUP_EXCLUSIONS := /data/fonts/files
 TW_EXCLUDE_APEX := true
 TW_EXCLUDE_DEFAULT_USB_INIT := true
 TW_ENABLE_FS_COMPRESSION := true
-TW_INCLUDE_REPACKTOOLS := false  # 同上
-TW_INCLUDE_LPDUMP := false      # 体积控制：recovery.img 受 67,633,152 分区上限约束
-TW_INCLUDE_LPTOOLS := false     # 同上
-TW_INCLUDE_FASTBOOTD := false   # 见下方说明：为控制 recovery 分区体积而关闭
-TW_EXCLUDE_TZDATA := true
+# 体积控制（recovery.img 必须 <= 67,633,152 B）。注意两个不同的判断语义：
+#   - REPACKTOOLS / FASTBOOTD 用 ifneq (,$(filter $(X),true)) 判断 -> 写 false 有效；
+#   - LPDUMP / LPTOOLS 用 ifneq ($(X),) 判断 -> 写 false 反而等于"启用"！必须留空。
+# 关闭 LPDUMP 连带去掉 lpdump / lpdumpd / liblpdump.so / libprotobuf-cpp-full.so（约 2.5 MB）。
+TW_INCLUDE_REPACKTOOLS := false
+TW_INCLUDE_LPDUMP :=
+TW_INCLUDE_LPTOOLS :=
+# 只要 PRODUCT_USE_DYNAMIC_PARTITIONS=true，fastbootd 就会被强制带入
+# （bootable/recovery/prebuilt/Android.mk:45），此处保留 false 仅作说明。
+TW_INCLUDE_FASTBOOTD := false
+# 打入 zoneinfo/tzdata（约 407 KB，压缩后约 200 KB）：默认时区已由
+# OF_DEFAULT_TIMEZONE := CST-8（POSIX 写法，不依赖文件）保证为中国时间，
+# 这里再把 tzdata 带上，使时区"选择列表"可用，并消除 __bionic_open_tzdata 报错。
+# 体积余量：分区 67,633,152 - AVB 69,632 - 当前内容 66,979,840 = 583,680 B。
+TW_EXCLUDE_TZDATA := false
 TW_EXCLUDE_NANO := true
 TW_EXCLUDE_BASH := true
 TWRP_INCLUDE_LOGCAT := true
