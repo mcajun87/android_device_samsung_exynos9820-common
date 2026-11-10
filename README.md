@@ -9,6 +9,16 @@
 
 ---
 
+## ⚠️ 自用定制提醒
+
+本树配套的设备树是**自用配置**，其中与出厂状态不同的项目（尤其是
+**电池按自制 5000 mAh 电芯配置**、boot 头部 `os_version` 绑定 ROM 版本）
+全部列在设备树仓库的
+[`docs/CUSTOMIZATIONS.md`](https://github.com/mcajun87/android_device_samsung_d1x/blob/fox_16.0/docs/CUSTOMIZATIONS.md)。
+用别人的机器之前请先对照那篇文档。
+
+---
+
 ## 本树负责什么
 
 | 内容 | 文件 |
