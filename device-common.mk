@@ -36,3 +36,29 @@ PRODUCT_OTA_ENFORCE_VINTF_KERNEL_REQUIREMENTS := false
 # AOSP 的报错本身给出的设备级官方解法就是：
 #   PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
 PRODUCT_CHECK_PREBUILT_MAX_PAGE_SIZE := false
+
+# ---------------------------------------------------------------------------
+# VoLTE / IMS 强制开启（D2+D3）
+#
+# 现象：本机 SIM 为中国联通 46001，语音/数据都 IN_SERVICE、IMS 进程也都在跑，
+#       但电话打不通、短信发不出。原因是：
+#         - ro.carrier = unknown（三星韩国固件遗留 ro.boot.carrierid=KOO）
+#           → 匹配不到 46001 的 carrier config，落到默认值
+#         - 默认值里 carrier_volte_available_bool = false
+#         - 且 modem 上报 mVopsSupport = 2 (LTE_STATUS_NOT_SUPPORTED)
+#       联通已无 2G/3G 兜底，所以没有 VoLTE 就没有任何通话承载。
+#
+# 运行期 `setprop persist.dbg.ims_volte_enable 1` 会被权限拒绝，
+# 因此改为构建期写入默认属性（init 以 root 身份设置，不会被拒绝）。
+# ---------------------------------------------------------------------------
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
+    persist.dbg.ims_volte_enable=1 \
+    persist.dbg.ims_volte_enable_vt=1 \
+    persist.dbg.vt_avail_on=1 \
+    persist.dbg.vt_avail_on_ext=1 \
+    persist.radio.calls.on.ims=1 \
+    persist.radio.jbims=1 \
+    persist.dbg.volte_avail_ovr=1 \
+    persist.dbg.wfc_avail_ovr=1 \
+    ro.carrier=CHN-CHINA-UNICOM \
+    ro.vendor.ims_support=1
