@@ -119,7 +119,7 @@ AB_OTA_UPDATER := false
 | `update_engine_sideload` + `bootctl` | ≈3,134,000 | `AB_OTA_UPDATER := false` 去掉 |
 | `lpdump`/`lpdumpd`/`liblpdump*`/`libprotobuf-cpp-full` | 2,552,328 | `TW_INCLUDE_LPDUMP :=` 留空去掉 |
 | 内核 `-O2` → `-Os` | — | 49,059,864 → 47,601,688（省 1,458,176） |
-| ramdisk 压缩 `lzma -6` → `-9` | — | 18,449,104 → 16,599,792（省 1,849,312） |
+| ramdisk 压缩：`lzma(SDK 9.22) -9` → `xz --format=lzma -9` | — | 17,012,716 → 16,603,639（省 409,077）。**关键不是 `-9` 而是字典**：SDK 9.22 的 `lzma -9` 只有 32 MiB 字典（头 `02`），会超 16 MiB；`xz --format=lzma -9` 是 64 MiB 字典（头 `04`）|
 
 ---
 
