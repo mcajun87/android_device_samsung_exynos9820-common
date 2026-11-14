@@ -1,184 +1,95 @@
 #!/system/bin/sh
 #
-# 防止 ROM 把官方 recovery 镜像写回去（OrangeFox d1x 默认开启）
-# ---------------------------------------------------------------------------
-# 真实机制（2026-11 在 Evolution X A17 / d1x 实机上查证，不是猜的）：
+# 阻止 ROM 把官方 recovery 写回去（OrangeFox d1x 默认启用）
 #
-#   1) /vendor/etc/recovery.img
-#        完整的三星官方 recovery 镜像，67633152 字节，正好等于 recovery 分区大小。
-#        这是"原版镜像"的唯一来源。
-#   2) /vendor/etc/init/vendor_flash_recovery.rc
-#        service vendor_flash_recovery /vendor/bin/install-recovery.sh
-#        on property:persist.vendor.recovery_update=true  ->  start
-#        即：只要这个 persist 属性被置成 true，系统启动时就会把
-#        /vendor/etc/recovery.img 写回 recovery 分区。
-#   3) /vendor/recovery-from-boot.p + /vendor/bin/install-recovery.sh
-#        OneUI/部分机型的等价形式（用 applypatch 增量数据还原）。
+# 真凶不是 AOSP 的 install-recovery.sh，而是三星系的 recovery-persist：
+#   /system/bin/recovery-persist   在系统启动时把 recovery 分区覆盖回官方镜像
+# 本脚本把该二进制与其 init 服务改名（.ofdis），使它无法执行。
 #
-#   注意：/system/bin/recovery-persist **不是**元凶。它是 AOSP 原生的
-#   pmsg 日志轮转（bootable/recovery/recovery-persist.cpp），只往
-#   /data/misc/recovery 写 last_log/last_kmsg，绝不碰 recovery 分区。
+# 另外仍会顺带处理 AOSP 的 recovery-from-boot.p / install-recovery.sh，
+# 以防 ROM 版本不同。
 #
-# 处理策略分两级，先做绝对安全的一级：
-#
-#   A. 清掉 persist.vendor.recovery_update（永远执行，绝对安全）
-#      persist 属性存在 /persistent/properties/ 下，persistent 分区没有
-#      dm-verity 保护，改它不会影响开机。清掉后 vendor_flash_recovery
-#      服务永远不会被拉起。
-#
-#   B. 把 /vendor 下的还原来源改名（有条件执行）
-#      /vendor 和 /system 在 verity 模式为 enforcing 时是不可改的：
-#      改了会让 dm-verity 校验失败，机器直接开不了机。所以只有确认
-#      verity 未强制时才做。判断依据：/proc/cmdline 里的
-#      androidboot.veritymode。
-#      自建的 Evolution X ROM 的 proprietary-files.txt 里本来就没有
-#      recovery.img / vendor_flash_recovery.rc，所以这一步对自建 ROM
-#      是空操作，专用于第三方预编译 ROM。
-#
-# 安全约定：
-#   - 全部只改名（.ofdis 后缀），不删除，随时能改回来
-#   - 任何一步失败只写日志，不中断 recovery 启动
-#   - 有强制开关，见下面 opt-out / force 说明
-# ---------------------------------------------------------------------------
-# 关闭本功能：  touch /tmp/no_stock_recovery_restore      （本次启动生效）
-# 强制执行 B：  touch /tmp/force_stock_recovery_block     （明知 verity 关着时）
+# 安全策略：
+#   - 只改名，不删除，随时可改回
+#   - 必须先把 ROM 的 system 挂上（TWRP 通常挂到 /system_root；没挂就自己挂）
+#   - 任何失败只写日志，不影响 recovery 启动
 #
 LOG=/tmp/disablestockrecovery.log
-say() { echo "[$(date '+%H:%M:%S')] $*" >> "$LOG"; }
+say() { echo "[$(date)] $*" >> "$LOG"; }
 echo "[$(date)] 开始" > "$LOG"
 
-# ---------- opt-out ----------
-if [ -e /tmp/no_stock_recovery_restore ]; then
-    say "存在 /tmp/no_stock_recovery_restore，跳过"
-    exit 0
-fi
+SYSDEV=/dev/block/mapper/system
+[ -e "$SYSDEV" ] || SYSDEV=$(readlink -f /dev/block/by-name/system 2>/dev/null)
 
-# 不能和 decryption 抢 /vendor：预解密流程要求 /vendor 未挂载
+# ---------- 1. 等 / 或自己挂载 system ----------
+SR=""
 i=0
-while [ "$i" -lt 60 ]; do
-    if [ -z "$(getprop dev.mnt.blk.vendor)" ]; then break; fi
+while [ $i -lt 120 ]; do
+    if mount | grep -q ' /system_root '; then SR=/system_root; break; fi
+    if [ -e /system_root/bin/recovery-persist ]; then SR=/system_root; break; fi
     i=$((i+1)); sleep 1
 done
-say "dev.mnt.blk.vendor=[$(getprop dev.mnt.blk.vendor)] 等待 ${i}s"
 
-# ===========================================================================
-# A. 清掉 persist.vendor.recovery_update（安全，永远执行）
-# ===========================================================================
-PDEV=""
-for c in /dev/block/by-name/persistent /dev/block/mapper/persistent /dev/block/sda19; do
-    [ -e "$c" ] && { PDEV="$c"; break; }
-done
-
-if [ -z "$PDEV" ]; then
-    say "A: 找不到 persistent 分区，跳过"
-else
-    P=/tmp/of_persist
-    mkdir -p "$P"
-    if mount -o rw "$PDEV" "$P" 2>>"$LOG"; then
-        found=0
-        for f in "$P/properties/persist.vendor.recovery_update" \
-                 "$P/properties/persist.vendor.recovery_update.true" \
-                 "$P/prop/persist.vendor.recovery_update"; do
-            if [ -e "$f" ]; then
-                found=1
-                cur=$(cat "$f" 2>/dev/null)
-                say "A: 发现 $f = [$cur]"
-                if [ -e "$f.ofdis" ]; then rm -f "$f.ofdis"; fi
-                if mv "$f" "$f.ofdis" 2>>"$LOG"; then
-                    say "A: 已改名 -> .ofdis（该服务将无法被触发）"
-                else
-                    say "A: 改名失败"
-                fi
-            fi
-        done
-        [ "$found" = "0" ] && say "A: 没有 persist.vendor.recovery_update（服务本来就不会启动）"
-        umount "$P" 2>/dev/null
+MOUNTED_BY_US=0
+if [ -z "$SR" ]; then
+    say "TWRP 未挂载 system，自己挂"
+    mkdir -p /system_root
+    if mount -t ext4 -o rw "$SYSDEV" /system_root 2>>"$LOG"; then
+        SR=/system_root; MOUNTED_BY_US=1
+        say "自挂成功: $SYSDEV -> /system_root"
+    elif mount -t erofs -o rw "$SYSDEV" /system_root 2>>"$LOG"; then
+        SR=/system_root; MOUNTED_BY_US=1
+        say "自挂成功(erofs): $SYSDEV"
     else
-        say "A: 挂载 persistent 失败，跳过"
+        say "挂载失败，放弃"
+        exit 0
     fi
-    rmdir "$P" 2>/dev/null
 fi
+say "system 根: $SR"
 
-# ===========================================================================
-# B. 改掉 /vendor、/system 下的还原来源（只在 verity 未强制时）
-# ===========================================================================
-CMDLINE=$(cat /proc/cmdline 2>/dev/null)
-VERITY=$(echo "$CMDLINE" | tr ' ' '\n' | sed -n 's/^androidboot\.veritymode=//p')
-[ -z "$VERITY" ] && VERITY=$(getprop ro.boot.veritymode)
-say "B: androidboot.veritymode=[$VERITY]"
+# ---------- 2. 改成可写 ----------
+mount -o remount,rw /system_root 2>>"$LOG"
+if ! touch "$SR/.of_wtest" 2>/dev/null; then
+    say "system 分区不可写（可能是 dm-verity/只读），尝试用 /system 路径"
+    SR=/system
+fi
+rm -f "$SR/.of_wtest" 2>/dev/null
 
-DO_B=0
-case "$VERITY" in
-    enforcing)
-        if [ -e /tmp/force_stock_recovery_block ]; then
-            DO_B=1; say "B: verity=enforcing，但存在 force 标记，仍然执行"
-        else
-            say "B: verity=enforcing —— 改动会被 dm-verity 判定为损坏、导致无法开机，跳过"
-            say "B: 若确认本机 verity 实际已关闭，可 touch /tmp/force_stock_recovery_block 后重试"
-        fi
-        ;;
-    *)
-        DO_B=1
-        say "B: verity 未强制（[$VERITY]），执行改名"
-        ;;
-esac
-
+# ---------- 3. 逐个改名 ----------
 dis() {
     f="$1"
     [ -e "$f" ] || return 0
-    if [ -e "$f.ofdis" ]; then say "  已处理过: $f"; return 0; fi
+    [ -e "$f.ofdis" ] && { say "已处理: $f"; return 0; }
     if mv "$f" "$f.ofdis" 2>>"$LOG"; then
-        say "  改名成功: $f"
+        say "改名成功: $f"
     else
-        say "  改名失败: $f"
+        say "改名失败: $f"
     fi
 }
 
-neutralise_part() {
-    local name="$1" dev="$2"
-    [ -e "$dev" ] || { say "  $name: 设备不存在 $dev"; return 0; }
-    local M=/tmp/of_$name
-    mkdir -p "$M"
-    blockdev --setrw "$dev" 2>/dev/null
-    if ! mount -o rw "$dev" "$M" 2>>"$LOG"; then
-        say "  $name: 挂载失败，跳过"
-        rmdir "$M" 2>/dev/null
-        blockdev --setro "$dev" 2>/dev/null
-        return 0
-    fi
-    say "  $name: 已挂载到 $M（可写）"
-    # 三星系
-    dis "$M/etc/recovery.img"
-    dis "$M/bin/install-recovery.sh"
-    dis "$M/etc/init/vendor_flash_recovery.rc"
-    dis "$M/recovery-from-boot.p"
-    # AOSP 系
-    dis "$M/etc/install-recovery.sh"
-    dis "$M/etc/init/install-recovery.rc"
-    dis "$M/recovery-resource.dat"
-    dis "$M/etc/recovery-resource.dat"
-    sync
-    umount "$M" 2>/dev/null
-    rmdir "$M" 2>/dev/null
-    blockdev --setro "$dev" 2>/dev/null
-    say "  $name: 已卸载并恢复只读"
-}
+# 真凶：recovery-persist
+dis "$SR/bin/recovery-persist"
+dis "$SR/system/bin/recovery-persist"
+dis "$SR/etc/init/recovery-persist.rc"
+dis "$SR/system/etc/init/recovery-persist.rc"
+dis "$SR/etc/recovery-persist"
+dis "$SR/system/etc/recovery-persist"
 
-if [ "$DO_B" = "1" ]; then
-    # /system 本体在 system 分区，recovery 视角下可能已挂在 /system_root
-    if mount | grep -q ' /system_root '; then
-        say "B: system 已由 TWRP 挂在 /system_root，就地处理"
-        dis /system_root/bin/install-recovery.sh
-        dis /system_root/etc/install-recovery.sh
-        dis /system_root/recovery-from-boot.p
-        dis /system_root/etc/init/install-recovery.rc
-    else
-        neutralise_part system /dev/block/mapper/system
-    fi
-    neutralise_part vendor /dev/block/mapper/vendor
+# AOSP 传统机制（若无则自动跳过）
+dis "$SR/recovery-from-boot.p"
+dis "$SR/system/recovery-from-boot.p"
+dis "$SR/bin/install-recovery.sh"
+dis "$SR/system/bin/install-recovery.sh"
+dis "$SR/etc/install-recovery.sh"
+dis "$SR/system/etc/install-recovery.sh"
+
+# ---------- 4. 收尾 ----------
+if [ "$MOUNTED_BY_US" = "1" ]; then
+    umount /system_root 2>/dev/null
+    say "已卸载 /system_root"
 else
-    say "B: 跳过（见上面的 verity 判断）"
+    mount -o remount,ro /system_root 2>/dev/null
+    say "已恢复只读"
 fi
-
 say "完成"
 exit 0

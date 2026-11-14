@@ -45,7 +45,11 @@ BOARD_MKBOOTIMG_ARGS := \
     --header_version $(BOARD_BOOTIMG_HEADER_VERSION)
 
 # The physical system partition holds the dynamic partitions metadata
-BOARD_KERNEL_CMDLINE ?= androidboot.super_partition=system
+# [d1x] 这里不要再写 BOARD_KERNEL_CMDLINE=androidboot.super_partition=system：
+#       build/make/core/config.mk:1092 在 BOARD_SUPER_PARTITION_METADATA_DEVICE=system
+#       （d1x/BoardConfig.mk:28）时会自动追加一次，这里再写一次会让 recovery.img
+#       头部 cmdline 变成 "... ... " 重复两遍（v7b 里只有一遍）。
+# BOARD_KERNEL_CMDLINE ?= androidboot.super_partition=system
 # 【解密关键】S-Boot 会把 boot 镜像头部的 os_version 字段直接交给 TEE 的 keymaster
 # （日志：tz_init_bootloader_info: os_version : 160000 -> swd_configure:
 #  invalid os_version or os_patchlevel -> km_check_key_os_version_patchlevels 拒绝解封
@@ -54,6 +58,17 @@ BOARD_KERNEL_CMDLINE ?= androidboot.super_partition=system
 # 本机 ROM 是 Android 17，所以这里追加（追加在构建系统自己的 --os_version 16 之后，
 # mkbootimg 取最后一次的值）。
 BOARD_MKBOOTIMG_ARGS += --os_version 17 --os_patch_level 2026-10-01
+
+# [d1x] AVB footer 里的 os_version / security_patch 也要跟着改成 17 / 2026-10-01。
+#       build/make/core/Makefile 用 BOOT_OS_VERSION ?= $(PLATFORM_VERSION_LAST_STABLE)
+#       （本树是 16），所以 avbtool 会在 footer 里写 os_version=16，
+#       而 mkbootimg 的 header 写的是 17 —— 两者不一致。
+#       三星 S-Boot 用这两个值做 rollback 判定：footer 里的 os_version 比设备
+#       已记录的低，就直接拒绝启动，现象是刷完重启黑屏、连 recovery 都进不去
+#       （v7b 的 footer 是 17 / 2026-10-01，实测能进；v8 写成 16，实测黑屏）。
+#       用 := 先赋值，Makefile 里的 ?= 就不会覆盖。
+BOOT_OS_VERSION := 17
+BOOT_SECURITY_PATCH := 2026-10-01
 
 # Partitions
 BOARD_FLASH_BLOCK_SIZE := 4096
@@ -220,4 +235,7 @@ OF_FL_PATH1 := /dev/fox_flash
 #     cmd: unknown variable '$(KERNEL_BUILD_OUT_PREFIX)'
 # 整个 ROM 构建就此卡死。补上这一行后上述变量全部有值。
 # ---------------------------------------------------------------------------
-include vendor/lineage/config/BoardConfigLineage.mk
+# [d1x] 改成 -include：OrangeFox 树里没有 vendor/lineage，硬 include 会让
+#       dumpvars 直接失败（vendor/lineage/config/BoardConfigLineage.mk: No such file）。
+#       该文件只在 LineageOS/Evolution ROM 树里存在，可选包含即可两边兼容。
+-include vendor/lineage/config/BoardConfigLineage.mk

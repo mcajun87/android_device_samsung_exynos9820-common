@@ -90,16 +90,11 @@ service vendor.gatekeeper-1-0 /vendor_rom/bin/hw/android.hardware.gatekeeper@1.0
 # ---------------------------------------------------------------------------
 # 禁止 ROM 还原官方 recovery（默认开启）
 #
-# 现象：刷入 OrangeFox 后能正常进入，但开机进过一次系统，recovery 分区就被
-#       写回官方镜像。
-# 已查证的来源（d1x / Evolution X A17 实机）：
-#       /vendor/etc/recovery.img                     原版恢复镜像本体（67633152 B）
-#       /vendor/etc/init/vendor_flash_recovery.rc    由 persist.vendor.recovery_update=true 触发
-#       /vendor/recovery-from-boot.p                 OneUI 系等价形式
-#       /system/bin/recovery-persist 与此无关，它只是 AOSP 的 pmsg 日志轮转。
-# 处理：见 recovery/root/system/bin/disablestockrecovery.sh 的注释与日志
-#       /tmp/disablestockrecovery.log。只改名不删除，可逆。
-# 关闭方法：touch /tmp/no_stock_recovery_restore（本次启动生效）
+# 现象：刷入 OrangeFox 后能正常进入，但开机进入一次系统，recovery 分区就被
+#       写回官方镜像。原因是 AOSP 系的 install-recovery.sh 会应用
+#       /system/recovery-from-boot.p。
+# 处理：启动时把这两样东西改名（.ofdis），可逆、不删除。
+# 关闭方法：把下面 service 的触发删掉，或在 /tmp 建 no_stock_recovery_restore 标记。
 # ---------------------------------------------------------------------------
 service disablestockrecovery /system/bin/disablestockrecovery.sh
     user root
